@@ -13,6 +13,34 @@ from .context import get_context
 
 DEFAULT_BASE_URL = "https://api.heycall-e.com"
 
+# Calling codes CALL-E lists at https://docs.heycall-e.com/regions (checked
+# 2026-11-10). Country calling codes are prefix-free, so a number belongs to
+# at most one of these. +1 covers US and CA (local lines); the rest use
+# CALL-E's international pool.
+SUPPORTED_CALLING_CODES: dict[str, str] = {
+    "+1": "US/CA",
+    "+31": "NL",
+    "+34": "ES",
+    "+44": "GB",
+    "+48": "PL",
+    "+49": "DE",
+    "+52": "MX",
+    "+55": "BR",
+    "+60": "MY",
+    "+61": "AU",
+    "+62": "ID",
+    "+63": "PH",
+    "+65": "SG",
+    "+66": "TH",
+    "+81": "JP",
+    "+84": "VN",
+    "+90": "TR",
+    "+91": "IN",
+    "+92": "PK",
+    "+358": "FI",
+    "+880": "BD",
+}
+
 
 class ConfigError(Exception):
     """The plugin is missing a value it needs for this operation."""
@@ -156,7 +184,7 @@ def load_settings() -> Settings:
         owner_number=str(_first("HERMES_CALL_ME_OWNER_NUMBER", "owner_number", "")).strip(),
         calle_base_url=_calle_base_url(),
         calle_region=_region(),
-        calle_locale=str(_first("HERMES_CALL_ME_LOCALE", "calle_locale", "en-US")).strip() or "en-US",
+        calle_locale=str(_first("HERMES_CALL_ME_LOCALE", "calle_locale", "")).strip(),
         call_timeout_seconds=timeout,
         daily_call_cap=cap,
         quiet_hours=str(_first("HERMES_CALL_ME_QUIET_HOURS", "quiet_hours", "22:00-07:00")).strip(),
@@ -180,13 +208,21 @@ def load_settings() -> Settings:
 
 
 def _region() -> str:
-    region = str(_first("HERMES_CALL_ME_REGION", "calle_region", "US")).strip().upper()
-    if len(region) != 2 or not region.isalpha():
+    """Blank means CALL-E infers the region from the number (+1 is US)."""
+    region = str(_first("HERMES_CALL_ME_REGION", "calle_region", "")).strip().upper()
+    if region and (len(region) != 2 or not region.isalpha()):
         raise ConfigError(
             "HERMES_CALL_ME_REGION must be a two-letter country code from "
-            f"https://docs.heycall-e.com/regions, got {region!r}. Default is US."
+            f"https://docs.heycall-e.com/regions, or blank to infer it from the number. Got {region!r}."
         )
     return region
+
+
+def calling_code_country(number: str) -> str | None:
+    for code, country in SUPPORTED_CALLING_CODES.items():
+        if number.startswith(code):
+            return country
+    return None
 
 
 def _calle_base_url() -> str:
@@ -212,6 +248,13 @@ def require_call_config(settings: Settings) -> None:
             "HERMES_CALL_ME_OWNER_NUMBER must be one E.164 number, including + "
             "and the country code, for example +14155550100. "
             "Refusing to dial without a single allowlisted number."
+        )
+    if not settings.calle_region and calling_code_country(settings.owner_number) is None:
+        raise ConfigError(
+            f"CALL-E does not list the country of {settings.owner_number[:4]}... as a calling region "
+            "(https://docs.heycall-e.com/regions). No call was placed. Use a US number that "
+            "rings you where you are (see the README section \"Your country isn't listed\"), "
+            "or, if CALL-E enabled this country on your account, set the region explicitly."
         )
     if not settings.calle_api_key:
         raise ConfigError(

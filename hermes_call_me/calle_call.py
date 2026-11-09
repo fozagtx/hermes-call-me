@@ -125,14 +125,19 @@ def build_task(purpose: str, facts: dict, *, one_time: str) -> str:
 
 
 def build_request(purpose: str, facts: dict, settings, *, local_id: str, one_time: str) -> dict:
-    return {
+    body = {
         "task": build_task(purpose, facts, one_time=one_time),
         "phone": settings.owner_number,
-        "region": settings.calle_region,
-        "locale": settings.calle_locale,
         "result_schema": result_schema(purpose),
         "metadata": {"hermes_call_id": local_id, "purpose": purpose},
     }
+    # Omitted hints are inferred by CALL-E: region from the number, locale
+    # from the task, which asks for English.
+    if settings.calle_region:
+        body["region"] = settings.calle_region
+    if settings.calle_locale:
+        body["locale"] = settings.calle_locale
+    return body
 
 
 _NUMBER_WORDS = (

@@ -29,6 +29,7 @@ Hermes Call Me turns "the owner said yes on the phone" into a value Hermes can a
 - **The PIN is the identity check.** Anyone who knows it and answers your phone can approve. Use a PIN you don't use anywhere else, and change it if you think it was overheard.
 - **The summary is read before the PIN is verified.** CALL-E's agent can't check the PIN during the call (it never sees it), so whoever answers hears the action and summary after saying any digits. Don't put secrets in what you ask Hermes to tell you.
 - **An approval is bound to a tool name, not its arguments.** An approval for `deploy_prod` lets one `deploy_prod` call run within the approval lifetime (default 10 minutes), whatever its arguments are. The summary you heard is written by the model.
+- **A forwarding number is a real number.** If you use the README's US-number workaround, anyone who has that number can ring your phone. They can't reach Hermes or approve anything, but keep the number dedicated to Hermes and unpublished.
 - **The guard is opt-in and pattern-based.** It only blocks tools whose names match the patterns. Review the built-in list against your tools.
 - **CALL-E sees the call.** CALL-E processes the audio and the text Hermes sends. Its handling of that data is covered by CALL-E's own terms, not this plugin.
 - **Spoken-number redaction is a heuristic.** It catches digit and number-word runs of three or more. Unusual phrasing may slip through, which is one more reason transcripts are never returned to the model.

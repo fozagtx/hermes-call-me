@@ -33,14 +33,14 @@ config_schema:
     description: "The one number the plugin may dial, in E.164 with + and the country code."
   calle_region:
     type: str
-    default: US
+    default: ""
     label: CALL-E region
-    description: "Two-letter destination country. Must match the owner number. See https://docs.heycall-e.com/regions."
+    description: "Leave blank: CALL-E infers it from the owner number (+1 is US). Set a two-letter code only if CALL-E enabled an extra country on your account. See https://docs.heycall-e.com/regions."
   calle_locale:
     type: str
-    default: en-US
+    default: ""
     label: CALL-E locale
-    description: "Spoken language, such as en-US."
+    description: "Leave blank to let CALL-E pick English for the region, or set one such as en-US or en-GB."
   call_timeout_seconds:
     type: int
     default: 180

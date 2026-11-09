@@ -72,12 +72,25 @@ def test_every_required_value_is_checked_before_dialing(monkeypatch):
             require_call_config(load_settings())
 
 
-def test_region_defaults_to_us_and_must_be_two_letters(monkeypatch):
+def test_region_is_inferred_by_default_and_must_be_two_letters_when_set(monkeypatch):
     from hermes_call_me.config import load_settings
 
     configure(monkeypatch)
-    assert load_settings().calle_region == "US"
-    assert load_settings().calle_locale == "en-US"
+    assert load_settings().calle_region == ""
+    assert load_settings().calle_locale == ""
     configure(monkeypatch, HERMES_CALL_ME_REGION="USA")
     with pytest.raises(ConfigError, match="two-letter"):
         load_settings()
+
+
+def test_listed_countries_pass_and_unlisted_ones_are_refused_before_dialing(monkeypatch):
+    from hermes_call_me.config import load_settings, require_call_config
+
+    for number in ("+14155550100", "+447700900123", "+919812345678", "+358401234567", "+8801712345678"):
+        configure(monkeypatch, HERMES_CALL_ME_OWNER_NUMBER=number)
+        require_call_config(load_settings())
+    configure(monkeypatch, HERMES_CALL_ME_OWNER_NUMBER="+233201234567")
+    with pytest.raises(ConfigError, match="isn't listed"):
+        require_call_config(load_settings())
+    configure(monkeypatch, HERMES_CALL_ME_OWNER_NUMBER="+233201234567", HERMES_CALL_ME_REGION="GH")
+    require_call_config(load_settings())

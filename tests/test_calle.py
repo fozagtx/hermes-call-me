@@ -23,8 +23,8 @@ def test_request_matches_v2_contract(monkeypatch):
         one_time="135790",
     )
     assert body["phone"] == "+14155550100"
-    assert body["region"] == "US"
-    assert body["locale"] == "en-US"
+    assert "region" not in body
+    assert "locale" not in body
     schema = body["result_schema"]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["decision"]["enum"] == ["approved", "denied", "unclear"]
@@ -130,7 +130,7 @@ def test_service_posts_real_path_and_reads_result(monkeypatch):
     result = service.run_approval(
         {"action": "deploy_prod", "risk": "high", "summary": "Ship checkout."}
     )
-    assert seen["body"]["region"] == "US"
+    assert "region" not in seen["body"]
     assert result["approved"] is True
     assert result["result"] == "approved"
     assert result["calle_call_id"] == "call_example"
@@ -405,3 +405,12 @@ def test_overlong_summary_is_refused_before_dialing(monkeypatch):
     assert calls == []
     assert result["approved"] is False
     assert "limit is 1000" in result["error"]
+
+
+def test_explicit_region_and_locale_are_sent(monkeypatch):
+    settings = _settings(monkeypatch, HERMES_CALL_ME_REGION="gb", HERMES_CALL_ME_LOCALE="en-GB",
+                         HERMES_CALL_ME_OWNER_NUMBER="+447700900123")
+    body = build_request("report", {"done": "d", "left": "l", "progress": "p"}, settings,
+                         local_id="call_local", one_time="135790")
+    assert body["region"] == "GB"
+    assert body["locale"] == "en-GB"
