@@ -1,67 +1,56 @@
 name: hermes-call-me
-version: "0.1.0"
+version: "0.2.0"
 manifest_version: 2
 api_version: 1
 description: >
-  Calls the owner in the browser through Vapi, or on a real CALL-E phone call,
-  for approval, help, or a progress report. Fail closed.
+  Phones the owner through CALL-E for approval, help, or a progress report.
+  A spoken PIN, checked by the plugin, gates every answer. Fails closed.
 author: fozagtx
 license: MIT
 requires_hermes: ">=0.21.6"
-tags: [voice, vapi, calle, approval]
+tags: [voice, phone, calle, approval, human-in-the-loop]
 provides_tools:
   - call_for_approval
   - call_for_help
   - call_report
 provides_hooks:
   - pre_tool_call
-  - pre_llm_call
 config_schema:
-  owner_number:
-    type: str
-    default: ""
-    label: Owner number
-    description: "Single allowlisted number in E.164, with + and country code. Default region is US. Required for phone calls."
-  owner_pin:
-    type: secret
-    env: HERMES_CALL_ME_PIN
-    label: Owner PIN
-    description: "4 to 12 digits. The voice agent asks for this first. The server compares it. Wrong, missing, or unclear means not approved."
-  vapi_api_key:
-    type: secret
-    env: VAPI_API_KEY
-    label: Vapi API key
-    description: "Private key from the Vapi dashboard. Used for the browser demo. Never put this in the browser page."
   calle_api_key:
     type: secret
     env: CALLE_API_KEY
     label: CALL-E API key
-    description: "Private key from the CALL-E dashboard. Used for real phone calls. Never put this in the browser page."
-  vapi_phone_number_id:
-    type: str
-    default: ""
-    label: Vapi phone number id
-    description: "Optional. Only for HERMES_CALL_ME_PROVIDER=vapi phone calls. CALL-E does not use it."
-  webhook_public_url:
-    type: str
-    default: ""
-    label: Webhook public URL
-    description: "Public https origin of this plugin's server, with no path. Vapi posts tool calls and end-of-call reports here."
-  webhook_secret:
+    description: "Private key from the CALL-E dashboard (https://dashboard.heycall-e.com/account/api-keys)."
+  owner_pin:
     type: secret
-    env: HERMES_CALL_ME_WEBHOOK_SECRET
-    label: Webhook secret
-    description: "Sent by Vapi as Authorization Bearer and X-Vapi-Secret. Requests that do not match are rejected."
+    env: HERMES_CALL_ME_PIN
+    label: Owner PIN
+    description: "4 to 12 digits. The call asks for it first and the plugin compares it. Wrong, missing, or unclear means not approved."
+  owner_number:
+    type: str
+    default: ""
+    label: Owner number
+    description: "The one number the plugin may dial, in E.164 with + and the country code."
+  calle_region:
+    type: str
+    default: US
+    label: CALL-E region
+    description: "Two-letter destination country. Must match the owner number. See https://docs.heycall-e.com/regions."
+  calle_locale:
+    type: str
+    default: en-US
+    label: CALL-E locale
+    description: "Spoken language, such as en-US."
   call_timeout_seconds:
     type: int
     default: 180
     label: Call timeout seconds
-    description: "How long a call may run before it is treated as no answer. Default is about 3 minutes."
+    description: "How long to wait for the call's result before returning no_answer. 30 to 600."
   daily_call_cap:
     type: int
     default: 8
     label: Daily call cap
-    description: "Maximum Vapi calls in a rolling 24 hours, browser and phone together."
+    description: "Maximum calls CALL-E accepts in a rolling 24 hours."
   quiet_hours:
     type: str
     default: "22:00-07:00"
@@ -71,12 +60,12 @@ config_schema:
     type: bool
     default: false
     label: Quiet hours enabled
-    description: "Off by default so a demo recording is not blocked. Turn on for unattended use."
+    description: "Turn on to refuse calls during quiet hours."
   owner_timezone:
     type: str
     default: "America/New_York"
     label: Owner timezone
-    description: "IANA timezone for quiet hours. Default is US Eastern."
+    description: "IANA timezone for quiet hours."
   guard_enabled:
     type: bool
     default: false
@@ -92,53 +81,3 @@ config_schema:
     default: 600
     label: Approval lifetime
     description: "How long an approval can be spent on the matching risky tool. Single use."
-  webhook_port:
-    type: int
-    default: 8787
-    label: Webhook port
-    description: "Local port for the webhook and the demo page. Bind is 127.0.0.1."
-  vapi_model:
-    type: str
-    default: "gpt-4o-mini"
-    label: Vapi model
-    description: "Model id for the voice agent. gpt-4o-mini keeps the demo cheap."
-  voice_provider:
-    type: str
-    default: "vapi"
-    label: Voice provider
-  voice_id:
-    type: str
-    default: "Elliot"
-    label: Voice id
-  default_channel:
-    type: str
-    default: "web"
-    choices: [web, phone]
-    label: Default channel
-    description: "web is the browser demo. phone dials the owner and stays off unless phone calls are enabled."
-  phone_calls_enabled:
-    type: bool
-    default: false
-    label: Phone calls enabled
-    description: "Must be true before a real CALL-E call. Leave false for the browser demo."
-  phone_provider:
-    type: str
-    default: calle
-    choices: [calle, vapi]
-    label: Phone provider
-    description: "calle places real phone calls with POST /v2/calls. vapi stays the browser demo. vapi can also place a phone call if you set a Vapi phoneNumberId."
-  calle_region:
-    type: str
-    default: US
-    label: CALL-E region
-    description: "Two-letter destination country. US and CA use local lines. Must match the owner number. See https://docs.heycall-e.com/regions."
-  calle_locale:
-    type: str
-    default: en-US
-    label: CALL-E locale
-    description: "Spoken language, such as en-US. A locale the region does not support is rejected by CALL-E before the call is created."
-  gateway_session_key:
-    type: str
-    default: ""
-    label: Gateway session key
-    description: "Optional Hermes gateway session key for inject_message after an inbound call. Empty uses the live CLI session."

@@ -1,4 +1,4 @@
-"""Lifecycle hooks. Neither hook places a call or opens a socket."""
+"""The risky-tool guard. It never places a call or opens a socket."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import re
 
 from .config import ConfigError, load_settings
 from .context import get_context
-from .inbound import task_prompt
 from .policy import DEFAULT_RISKY_PATTERNS
 from . import store
 
@@ -91,16 +90,3 @@ def guard_tool(tool_name, args=None, **kwargs):
             "An approval is single-use and expires."
         ),
     }
-
-
-def before_model(**kwargs):
-    """Show PIN-verified owner requests that were not injected into a live session."""
-    del kwargs
-    try:
-        tasks = [task for task in store.pending_tasks(3) if not task.get("injected")]
-    except Exception:
-        return None
-    if not tasks:
-        return None
-    body = "\n\n".join(task_prompt(task) for task in tasks)
-    return {"context": "Owner phone requests waiting:\n\n" + body}

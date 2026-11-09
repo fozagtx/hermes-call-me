@@ -1,5 +1,5 @@
 from hermes_call_me import store
-from hermes_call_me.hooks import before_model, guard_tool
+from hermes_call_me.hooks import guard_tool
 from tests.conftest import configure
 
 
@@ -16,20 +16,11 @@ def test_guard_blocks_then_allows_one_use(monkeypatch):
     assert guard_tool("read_file", {"path": "README.md"}) is None
     assert guard_tool("call_for_approval", {"action": "deploy_prod"}) is None
 
-    row = store.create_call(direction="outbound", channel="web", purpose="approval", status="approved")
+    row = store.create_call(purpose="approval", owner_number="+14155550100", one_time_code="135790")
     store.save_approval(call_id=row["id"], action="deploy_prod", summary="ship", risk="high", ttl_seconds=600)
     assert guard_tool("deploy_prod", {"target": "prod"}) is None
     again = guard_tool("deploy_prod", {"target": "prod"})
     assert again["action"] == "block"
-
-
-def test_before_model_surfaces_uninjected_tasks():
-    task = store.create_task(call_id=None, kind="task", text="Check the payments worker", callback=True)
-    injected = before_model()
-    assert task["id"] in injected["context"]
-    assert "callback" in injected["context"].lower() or "Call back" in injected["context"]
-    store.mark_task_injected(task["id"])
-    assert before_model() is None
 
 
 def test_guard_does_not_exempt_other_call_prefixed_tools(monkeypatch):

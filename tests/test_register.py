@@ -56,4 +56,4 @@ def test_declared_tools_match_registered_tools():
     assert ctx.hooks == hooks
     assert ctx.skills == ["call-me"]
     assert ctx.cli == ["call-me"]
-    assert "mock" not in (ROOT / "hermes_call_me" / "vapi.py").read_text(encoding="utf-8").lower()
+    assert not (ROOT / "hermes_call_me" / "vapi.py").exists()

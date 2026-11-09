@@ -1,7 +1,7 @@
 """Call policy: one allowlisted number, a daily cap, quiet hours, and the PIN.
 
-The PIN comparison is the server's job. The voice model never learns the PIN
-and cannot approve a call by claiming the PIN matched.
+The PIN comparison is this plugin's job. The CALL-E agent never learns the
+PIN and cannot approve a call by claiming the PIN matched.
 """
 
 from __future__ import annotations
@@ -12,9 +12,6 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import ConfigError, Settings
-
-_E164 = re.compile(r"^\+[1-9]\d{7,14}$")
-MAX_PIN_ATTEMPTS = 2
 
 # Used when the operator does not override risky_tool_patterns.
 DEFAULT_RISKY_PATTERNS: tuple[str, ...] = (
@@ -33,21 +30,6 @@ DEFAULT_RISKY_PATTERNS: tuple[str, ...] = (
     r"kubectl",
     r"migrate",
 )
-
-
-def normalize_number(number: str) -> str:
-    text = (number or "").strip().replace(" ", "").replace("-", "")
-    if text.startswith("00"):
-        text = "+" + text[2:]
-    return text
-
-
-def numbers_match(left: str, right: str) -> bool:
-    a = normalize_number(left)
-    b = normalize_number(right)
-    if not a or not b or not _E164.match(a) or not _E164.match(b):
-        return False
-    return hmac.compare_digest(a, b)
 
 
 def pin_digits(pin: str) -> str:
@@ -101,14 +83,8 @@ def in_quiet_hours(now: datetime, window: str, zone_name: str) -> bool:
     return current >= start or current < end
 
 
-def check_outbound(settings: Settings, channel: str, *, now: datetime | None = None, recent_calls: int) -> None:
-    """Refuse the call before Vapi is contacted."""
-    if channel == "phone":
-        if not settings.owner_number:
-            raise ConfigError(
-                "HERMES_CALL_ME_OWNER_NUMBER is empty. The phone path only dials "
-                "that one allowlisted number."
-            )
+def check_outbound(settings: Settings, *, now: datetime | None = None, recent_calls: int) -> None:
+    """Refuse the call before CALL-E is contacted."""
     if settings.daily_call_cap == 0 or recent_calls >= settings.daily_call_cap:
         raise ConfigError(
             f"Daily call cap reached ({recent_calls} of {settings.daily_call_cap} "
@@ -121,12 +97,5 @@ def check_outbound(settings: Settings, channel: str, *, now: datetime | None = N
             raise ConfigError(
                 f"Quiet hours are {settings.quiet_hours} ({settings.owner_timezone}). "
                 "No call was placed. Set HERMES_CALL_ME_QUIET_HOURS_ENABLED=0 to "
-                "record the demo outside that window."
+                "allow calls during that window."
             )
-
-
-def caller_allowed(settings: Settings, caller: str) -> bool:
-    """Inbound fail-closed: no caller id, or any number but the owner's, is refused."""
-    if not settings.owner_number or not caller:
-        return False
-    return numbers_match(caller, settings.owner_number)

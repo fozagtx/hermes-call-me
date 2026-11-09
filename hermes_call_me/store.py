@@ -1,18 +1,12 @@
-"""SQLite call log.
+"""SQLite call log and single-use approvals.
 
 Inside Hermes this opens ``plugin_db("hermes-call-me")``, which is
-``<HERMES_HOME>/plugin-data/hermes-call-me/data.db``. A standalone demo
-server falls back to that same path when the Hermes package is not
-importable, so the agent and the webhook process share one file when
-``HERMES_HOME`` matches.
-
-``HERMES_CALL_ME_DB`` points at a specific file. Tests set it. Production
-does not have to.
+``<HERMES_HOME>/plugin-data/hermes-call-me/data.db``. Outside Hermes it uses
+that same path. ``HERMES_CALL_ME_DB`` points at a specific file; tests set it.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import threading
@@ -25,72 +19,46 @@ _conn: sqlite3.Connection | None = None
 _key: str | None = None
 
 _CALL_COLUMNS = {
-    "vapi_call_id",
-    "direction",
-    "channel",
-    "purpose",
-    "customer_number",
+    "calle_call_id",
     "status",
     "reason",
     "decision",
     "pin_verified",
-    "pin_attempts",
-    "tool_decision",
-    "tool_instructions",
-    "tool_reply",
+    "instructions",
+    "reply",
     "transcript",
-    "cost_usd",
-    "duration_seconds",
     "ended_reason",
-    "join_url",
-    "control_url",
-    "structured_json",
     "error",
-    "inbound_task_id",
     "guard_action",
     "guard_summary",
     "guard_risk",
-    "one_time_code",
-    "provider",
     "ended_at",
 }
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS calls (
+CREATE TABLE IF NOT EXISTS phone_calls (
     id TEXT PRIMARY KEY,
-    vapi_call_id TEXT,
-    direction TEXT NOT NULL,
-    channel TEXT NOT NULL,
+    calle_call_id TEXT,
     purpose TEXT NOT NULL,
-    customer_number TEXT,
+    owner_number TEXT NOT NULL,
+    one_time_code TEXT NOT NULL,
     status TEXT NOT NULL,
     reason TEXT,
     decision TEXT,
     pin_verified INTEGER NOT NULL DEFAULT 0,
-    pin_attempts INTEGER NOT NULL DEFAULT 0,
-    tool_decision TEXT,
-    tool_instructions TEXT,
-    tool_reply TEXT,
+    instructions TEXT,
+    reply TEXT,
     transcript TEXT,
-    cost_usd REAL,
-    duration_seconds REAL,
     ended_reason TEXT,
-    join_url TEXT,
-    control_url TEXT,
-    structured_json TEXT,
     error TEXT,
-    inbound_task_id TEXT,
     guard_action TEXT,
     guard_summary TEXT,
     guard_risk TEXT,
-    one_time_code TEXT,
-    provider TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     ended_at TEXT
 );
-CREATE INDEX IF NOT EXISTS calls_vapi_id ON calls (vapi_call_id);
-CREATE INDEX IF NOT EXISTS calls_created ON calls (created_at);
+CREATE INDEX IF NOT EXISTS phone_calls_created ON phone_calls (created_at);
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY,
     call_id TEXT NOT NULL,
@@ -101,17 +69,6 @@ CREATE TABLE IF NOT EXISTS approvals (
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
     consumed_tool TEXT
-);
-CREATE TABLE IF NOT EXISTS inbound_tasks (
-    id TEXT PRIMARY KEY,
-    call_id TEXT,
-    kind TEXT NOT NULL,
-    text TEXT NOT NULL,
-    callback_requested INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL,
-    injected INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    done_at TEXT
 );
 """
 
@@ -166,18 +123,10 @@ def open_db() -> sqlite3.Connection:
             _conn.close()
         conn = _connect()
         conn.executescript(_SCHEMA)
-        _migrate(conn)
         conn.commit()
         _conn = conn
         _key = key
         return conn
-
-
-def _migrate(conn: sqlite3.Connection) -> None:
-    have = {row[1] for row in conn.execute("PRAGMA table_info(calls)")}
-    for name, declaration in (("one_time_code", "TEXT"), ("provider", "TEXT")):
-        if name not in have:
-            conn.execute(f"ALTER TABLE calls ADD COLUMN {name} {declaration}")
 
 
 def _row(row) -> dict | None:
@@ -194,29 +143,20 @@ def _write(fn):
         return result
 
 
-def create_call(
-    *,
-    direction: str,
-    channel: str,
-    purpose: str,
-    customer_number: str | None = None,
-    vapi_call_id: str | None = None,
-    status: str = "starting",
-) -> dict:
+def create_call(*, purpose: str, owner_number: str, one_time_code: str) -> dict:
     call_id = "call_" + uuid.uuid4().hex
     now = iso()
 
     def run(conn):
         conn.execute(
             """
-            INSERT INTO calls (
-                id, vapi_call_id, direction, channel, purpose, customer_number,
-                status, pin_verified, pin_attempts, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+            INSERT INTO phone_calls (
+                id, purpose, owner_number, one_time_code, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'starting', ?, ?)
             """,
-            (call_id, vapi_call_id, direction, channel, purpose, customer_number, status, now, now),
+            (call_id, purpose, owner_number, one_time_code, now, now),
         )
-        return _row(conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone())
+        return _row(conn.execute("SELECT * FROM phone_calls WHERE id = ?", (call_id,)).fetchone())
 
     return _write(run)
 
@@ -230,43 +170,26 @@ def update_call(call_id: str, **fields) -> dict | None:
     values = list(fields.values()) + [call_id]
 
     def run(conn):
-        conn.execute(f"UPDATE calls SET {assignments} WHERE id = ?", values)
-        return _row(conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone())
+        conn.execute(f"UPDATE phone_calls SET {assignments} WHERE id = ?", values)
+        return _row(conn.execute("SELECT * FROM phone_calls WHERE id = ?", (call_id,)).fetchone())
 
     return _write(run)
 
 
 def get_call(call_id: str) -> dict | None:
     def run(conn):
-        return _row(conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone())
-
-    return _write(run)
-
-
-def get_by_vapi(vapi_call_id: str) -> dict | None:
-    if not vapi_call_id:
-        return None
-
-    def run(conn):
-        return _row(
-            conn.execute(
-                "SELECT * FROM calls WHERE vapi_call_id = ? ORDER BY created_at DESC LIMIT 1",
-                (vapi_call_id,),
-            ).fetchone()
-        )
+        return _row(conn.execute("SELECT * FROM phone_calls WHERE id = ?", (call_id,)).fetchone())
 
     return _write(run)
 
 
 def count_recent_calls(hours: int = 24) -> int:
+    """Calls CALL-E accepted in the window. A refused create does not count."""
     since = iso(utcnow() - timedelta(hours=hours))
 
     def run(conn):
         row = conn.execute(
-            """
-            SELECT COUNT(*) AS n FROM calls
-            WHERE vapi_call_id IS NOT NULL AND created_at >= ?
-            """,
+            "SELECT COUNT(*) AS n FROM phone_calls WHERE calle_call_id IS NOT NULL AND created_at >= ?",
             (since,),
         ).fetchone()
         return int(row["n"])
@@ -274,26 +197,10 @@ def count_recent_calls(hours: int = 24) -> int:
     return _write(run)
 
 
-def active_call() -> dict | None:
-    def run(conn):
-        return _row(
-            conn.execute(
-                """
-                SELECT * FROM calls
-                WHERE status IN ('starting', 'ringing', 'in_progress')
-                  AND join_url IS NOT NULL
-                ORDER BY created_at DESC LIMIT 1
-                """
-            ).fetchone()
-        )
-
-    return _write(run)
-
-
 def recent_calls(limit: int = 8) -> list[dict]:
     def run(conn):
         rows = conn.execute(
-            "SELECT * FROM calls ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM phone_calls ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [_row(row) for row in rows]
@@ -306,42 +213,12 @@ def in_progress() -> dict | None:
         return _row(
             conn.execute(
                 """
-                SELECT * FROM calls
-                WHERE status IN ('starting', 'ringing', 'in_progress')
+                SELECT * FROM phone_calls
+                WHERE status IN ('starting', 'in_progress')
                 ORDER BY created_at DESC LIMIT 1
                 """
             ).fetchone()
         )
-
-    return _write(run)
-
-
-def record_pin_attempt(call_id: str, *, verified: bool) -> dict | None:
-    def run(conn):
-        row = conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone()
-        if row is None:
-            return None
-        already = bool(row["pin_verified"])
-        attempts = int(row["pin_attempts"])
-        if verified:
-            conn.execute(
-                "UPDATE calls SET pin_verified = 1, updated_at = ? WHERE id = ?",
-                (iso(), call_id),
-            )
-        elif not already:
-            conn.execute(
-                "UPDATE calls SET pin_attempts = ?, updated_at = ? WHERE id = ?",
-                (attempts + 1, iso(), call_id),
-            )
-        return _row(conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone())
-
-    return _write(run)
-
-
-def has_approval(call_id: str) -> bool:
-    def run(conn):
-        row = conn.execute("SELECT id FROM approvals WHERE call_id = ? LIMIT 1", (call_id,)).fetchone()
-        return row is not None
 
     return _write(run)
 
@@ -354,9 +231,8 @@ def save_approval(*, call_id: str, action: str, summary: str, risk: str, ttl_sec
     def run(conn):
         conn.execute(
             """
-            INSERT INTO approvals (
-                id, call_id, action, summary, risk, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO approvals (id, call_id, action, summary, risk, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (approval_id, call_id, action, summary, risk, iso(created), iso(expires)),
         )
@@ -380,11 +256,7 @@ def claim_approval(tool_name: str, *, now: datetime | None = None) -> dict | Non
         if row is None:
             return None
         updated = conn.execute(
-            """
-            UPDATE approvals
-            SET consumed_at = ?, consumed_tool = ?
-            WHERE id = ? AND consumed_at IS NULL
-            """,
+            "UPDATE approvals SET consumed_at = ?, consumed_tool = ? WHERE id = ? AND consumed_at IS NULL",
             (moment, tool_name, row["id"]),
         )
         if updated.rowcount != 1:
@@ -392,64 +264,3 @@ def claim_approval(tool_name: str, *, now: datetime | None = None) -> dict | Non
         return _row(conn.execute("SELECT * FROM approvals WHERE id = ?", (row["id"],)).fetchone())
 
     return _write(run)
-
-
-def create_task(*, call_id: str | None, kind: str, text: str, callback: bool) -> dict:
-    task_id = "task_" + uuid.uuid4().hex
-    now = iso()
-
-    def run(conn):
-        conn.execute(
-            """
-            INSERT INTO inbound_tasks (
-                id, call_id, kind, text, callback_requested, status, injected, created_at
-            ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?)
-            """,
-            (task_id, call_id, kind, text, 1 if callback else 0, now),
-        )
-        return _row(conn.execute("SELECT * FROM inbound_tasks WHERE id = ?", (task_id,)).fetchone())
-
-    return _write(run)
-
-
-def mark_task_injected(task_id: str) -> None:
-    def run(conn):
-        conn.execute("UPDATE inbound_tasks SET injected = 1 WHERE id = ?", (task_id,))
-
-    _write(run)
-
-
-def complete_task(task_id: str) -> None:
-    def run(conn):
-        conn.execute(
-            "UPDATE inbound_tasks SET status = 'done', done_at = ? WHERE id = ?",
-            (iso(), task_id),
-        )
-
-    _write(run)
-
-
-def pending_tasks(limit: int = 3) -> list[dict]:
-    def run(conn):
-        rows = conn.execute(
-            """
-            SELECT * FROM inbound_tasks
-            WHERE status = 'pending'
-            ORDER BY created_at ASC LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [_row(row) for row in rows]
-
-    return _write(run)
-
-
-def get_task(task_id: str) -> dict | None:
-    def run(conn):
-        return _row(conn.execute("SELECT * FROM inbound_tasks WHERE id = ?", (task_id,)).fetchone())
-
-    return _write(run)
-
-
-def dumps(value) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)

@@ -1,8 +1,11 @@
 """CALL-E Developer API. One-shot calls only. No stand-in responses.
 
-``POST /v2/calls`` accepts one E.164 number, a task, and a result schema, and
-returns 202. ``GET /v2/calls/{id}`` is polled until ``result_status`` is no
-longer ``pending``. Tests replace ``perform_http``. Runtime uses urllib.
+Follows https://docs.heycall-e.com/calls: ``POST /v2/calls`` accepts one
+E.164 number, a task, and a result schema, and returns 202. ``GET
+/v2/calls/{id}`` is polled every two seconds while ``result_status`` is
+``pending``. A create whose acceptance is uncertain is retried with the same
+body and the same ``Idempotency-Key``, which never dials twice. Tests replace
+``perform_http``. Runtime uses urllib.
 """
 
 from __future__ import annotations
@@ -12,18 +15,26 @@ import time
 import urllib.error
 import urllib.request
 
-from .config import Settings, scrub
+from .config import DEFAULT_BASE_URL, Settings, scrub
 
-DEFAULT_BASE_URL = "https://api.heycall-e.com"
+CREATE_ATTEMPTS = 4
 
 
 class CalleError(Exception):
     """CALL-E rejected the request, or the call never finished in time."""
 
-    def __init__(self, message: str, *, status: int | None = None, code: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: str | None = None,
+        reason_code: str | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.code = code
+        self.reason_code = reason_code
 
 
 def perform_http(
@@ -51,16 +62,19 @@ def perform_http(
             return response.status, parsed
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:800]
-        message, code = _error_text(detail, exc.code, method, url)
-        raise CalleError(scrub(message), status=exc.code, code=code) from exc
+        message, code, reason_code = _error_text(detail, exc.code, method, url)
+        raise CalleError(scrub(message), status=exc.code, code=code, reason_code=reason_code) from exc
     except urllib.error.URLError as exc:
         raise CalleError(f"CALL-E {method} {url} could not connect: {exc.reason}") from exc
     except json.JSONDecodeError as exc:
         raise CalleError(f"CALL-E {method} {url} returned invalid JSON.") from exc
+    except (TimeoutError, OSError) as exc:
+        raise CalleError(f"CALL-E {method} {url} did not respond: {exc}") from exc
 
 
-def _error_text(detail: str, status: int, method: str, url: str) -> tuple[str, str | None]:
+def _error_text(detail: str, status: int, method: str, url: str) -> tuple[str, str | None, str | None]:
     code = None
+    reason_code = None
     message = detail.strip()
     try:
         parsed = json.loads(detail) if detail else {}
@@ -71,18 +85,28 @@ def _error_text(detail: str, status: int, method: str, url: str) -> tuple[str, s
         if isinstance(error, dict):
             code = error.get("code") if isinstance(error.get("code"), str) else None
             text = error.get("message") if isinstance(error.get("message"), str) else ""
-            missing = (error.get("details") or {}).get("missing_inputs") if isinstance(error.get("details"), dict) else None
+            details = error.get("details") if isinstance(error.get("details"), dict) else {}
+            missing = details.get("missing_inputs")
+            if isinstance(details.get("reason_code"), str):
+                reason_code = details["reason_code"]
             if text:
                 message = text
             if isinstance(missing, list) and missing:
                 message = message + " Missing: " + "; ".join(str(item) for item in missing)
     if not message:
         message = f"HTTP {status}"
-    return f"CALL-E {method} {url} failed ({status}{', ' + code if code else ''}): {message}", code
+    return f"CALL-E {method} {url} failed ({status}{', ' + code if code else ''}): {message}", code, reason_code
 
 
 def base_url(settings: Settings) -> str:
     return (settings.calle_base_url or DEFAULT_BASE_URL).rstrip("/")
+
+
+def _uncertain(exc: CalleError) -> bool:
+    """True when acceptance is unknown and the same request may be replayed."""
+    if exc.status == 409:
+        return exc.reason_code == "creation_in_progress"
+    return exc.status is None or exc.status >= 500
 
 
 def create_call(
@@ -91,8 +115,11 @@ def create_call(
     *,
     idempotency_key: str,
     http=None,
+    sleep=None,
 ) -> dict:
+    """Create one Call. Replays the unchanged body and key when acceptance is uncertain."""
     http = http or perform_http
+    sleep = sleep or time.sleep
     if not settings.calle_api_key:
         raise CalleError(
             "CALLE_API_KEY is not set. No call was placed. "
@@ -100,15 +127,22 @@ def create_call(
         )
     if not idempotency_key or len(idempotency_key) > 255:
         raise CalleError("Idempotency-Key must be 1 to 255 characters. No call was placed.")
-    _status, payload = http(
-        "POST",
-        f"{base_url(settings)}/v2/calls",
-        settings.calle_api_key,
-        body,
-        {"Idempotency-Key": idempotency_key},
-        45,
-    )
-    return payload
+    for attempt in range(1, CREATE_ATTEMPTS + 1):
+        try:
+            _status, payload = http(
+                "POST",
+                f"{base_url(settings)}/v2/calls",
+                settings.calle_api_key,
+                body,
+                {"Idempotency-Key": idempotency_key},
+                45,
+            )
+            return payload
+        except CalleError as exc:
+            if attempt == CREATE_ATTEMPTS or not _uncertain(exc):
+                raise
+            sleep(2 * attempt)
+    raise CalleError("CALL-E create did not complete. No new call was placed.")
 
 
 def get_call(call_id: str, settings: Settings, *, http=None) -> dict:
@@ -148,10 +182,12 @@ def wait_for_result(
     *,
     timeout_seconds: int,
     http=None,
-    sleep=time.sleep,
-    monotonic=time.monotonic,
+    sleep=None,
+    monotonic=None,
 ) -> dict:
     http = http or perform_http
+    sleep = sleep or time.sleep
+    monotonic = monotonic or time.monotonic
     """Poll until the business result is no longer pending. A timeout does not redial."""
     deadline = monotonic() + timeout_seconds
     last: dict = {}

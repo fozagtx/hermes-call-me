@@ -1,18 +1,20 @@
 """Tool schemas the model reads."""
 
+_TRUST = (
+    "The owner says their PIN first, and this plugin compares the digits; the "
+    "CALL-E agent never knows the PIN. A wrong PIN, no answer, busy, silence, "
+    "a timeout, or an unclear reply never counts as a yes."
+)
+
 CALL_FOR_APPROVAL = {
     "name": "call_for_approval",
     "description": (
-        "Phone or browser-call the owner and ask for a yes or no before a risky action. "
-        "The owner must say the PIN first. The server compares the PIN. "
-        "Returns result approved, denied, or no_answer. "
-        "Treat approved as true only when approved is true. "
-        "No answer, a wrong PIN, silence, a timeout, or an unclear reply is not approval. "
-        "channel web (the default) is a real Vapi browser call and does not dial a phone. "
-        "channel phone places a CALL-E call to the one allowlisted number. "
-        "The owner says their PIN, hears the change, and repeats a one-time code. "
-        "This server checks both. A wrong PIN, a wrong code, no answer, or an unclear reply is not approval. "
-        "On web, the owner joins from the local demo page while this tool waits."
+        "Phone the owner through CALL-E and ask for a yes or no before a risky action. "
+        "CALL-E reads the change aloud and a one-time code; the owner says their PIN, "
+        "repeats the code, then says approve or deny. This plugin checks the PIN and the code. "
+        + _TRUST
+        + " Returns result approved, denied, or no_answer. Treat it as approval only when "
+        "approved is true. Do not call again to get a different answer."
     ),
     "parameters": {
         "type": "object",
@@ -27,12 +29,7 @@ CALL_FOR_APPROVAL = {
             },
             "summary": {
                 "type": "string",
-                "description": "What the owner will hear: what will change if they approve.",
-            },
-            "channel": {
-                "type": "string",
-                "enum": ["web", "phone"],
-                "description": "web is the Vapi browser demo. phone is a CALL-E call to the allowlisted number.",
+                "description": "What the owner will hear: what changes if they approve.",
             },
         },
         "required": ["action", "risk", "summary"],
@@ -42,22 +39,18 @@ CALL_FOR_APPROVAL = {
 CALL_FOR_HELP = {
     "name": "call_for_help",
     "description": (
-        "Call the owner when you are stuck on a production problem and need their knowledge. "
-        "The owner says the PIN first. Returns instructions only when the server verified the PIN "
-        "and the owner actually gave instructions. If instructions is null, stop and show the "
-        "reason. Do not invent a next step from the transcript. "
-        "channel web is the Vapi browser demo. channel phone is a CALL-E call to the allowlisted number. Instructions are null unless the PIN matched."
+        "Phone the owner through CALL-E when you are stuck on a production problem and need "
+        "their knowledge. "
+        + _TRUST
+        + " Returns instructions only when the PIN matched and the owner actually gave "
+        "instructions. If instructions is null, stop and show the reason. Do not invent a "
+        "next step from the transcript."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "issue": {"type": "string", "description": "What is broken, in one or two sentences."},
             "what_i_tried": {"type": "string", "description": "What you already tried, so the owner does not repeat it."},
-            "channel": {
-                "type": "string",
-                "enum": ["web", "phone"],
-                "description": "web is the Vapi browser demo. phone is a CALL-E call to the allowlisted number.",
-            },
         },
         "required": ["issue", "what_i_tried"],
     },
@@ -66,11 +59,11 @@ CALL_FOR_HELP = {
 CALL_REPORT = {
     "name": "call_report",
     "description": (
-        "Call the owner to report finished work: what you did, what is left, and progress. "
-        "This is not a request for approval. The owner says the PIN, hears the report, and "
-        "may leave a short reply. delivered is true only after the PIN check. "
-        "If they phoned in a task and asked for a callback, pass that inbound_task_id. "
-        "channel web is the browser demo."
+        "Phone the owner through CALL-E to report finished work: what you did, what is left, "
+        "and progress. This is not a request for approval. "
+        + _TRUST
+        + " delivered is true only after the PIN matched and the owner acknowledged the report. "
+        "reply holds a short answer if they gave one."
     ),
     "parameters": {
         "type": "object",
@@ -78,15 +71,6 @@ CALL_REPORT = {
             "done": {"type": "string", "description": "What you finished."},
             "left": {"type": "string", "description": "What is still open. Say none if nothing is left."},
             "progress": {"type": "string", "description": "Where things stand now."},
-            "channel": {
-                "type": "string",
-                "enum": ["web", "phone"],
-                "description": "web is the Vapi browser demo. phone is a CALL-E call to the allowlisted number.",
-            },
-            "inbound_task_id": {
-                "type": "string",
-                "description": "Optional id of an owner phone request this report closes.",
-            },
         },
         "required": ["done", "left", "progress"],
     },

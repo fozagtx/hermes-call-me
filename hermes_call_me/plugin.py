@@ -7,7 +7,7 @@ from pathlib import Path
 from . import schemas, tools
 from .cli import cli_main, setup_cli, slash_status
 from .context import set_context
-from .hooks import before_model, guard_tool
+from .hooks import guard_tool
 
 TOOLSET = "hermes_call_me"
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "call-me" / "SKILL.md"
@@ -30,7 +30,6 @@ def register(ctx) -> None:
             description=schema["description"],
         )
     ctx.register_hook("pre_tool_call", guard_tool)
-    ctx.register_hook("pre_llm_call", before_model)
 
     register_skill = getattr(ctx, "register_skill", None)
     if register_skill is not None and SKILL.is_file():
@@ -40,7 +39,7 @@ def register(ctx) -> None:
     if register_cli is not None:
         register_cli(
             name="call-me",
-            help="Browser or phone the owner for approval, help, or a report",
+            help="Recent CALL-E calls to the owner",
             setup_fn=setup_cli,
             handler_fn=cli_main,
         )
@@ -51,7 +50,7 @@ def register(ctx) -> None:
             register_command(
                 "call-me",
                 handler=slash_status,
-                description="Show recent Hermes Call Me calls and pending owner requests",
+                description="Show recent Hermes Call Me calls",
             )
         except TypeError:
             register_command("call-me", slash_status, "Show recent Hermes Call Me calls")

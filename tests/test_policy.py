@@ -3,13 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from hermes_call_me.config import ConfigError
-from hermes_call_me.policy import (
-    caller_allowed,
-    check_outbound,
-    in_quiet_hours,
-    numbers_match,
-    pin_matches,
-)
+from hermes_call_me.policy import check_outbound, in_quiet_hours, pin_matches
 from tests.conftest import configure
 
 
@@ -34,12 +28,6 @@ def test_pin_matches_digits_only():
     assert pin_matches("", "2468") is False
 
 
-def test_allowlist_is_one_number():
-    assert numbers_match("+233200000000", "+233 200 000 000")
-    assert numbers_match("+233200000000", "+233200000001") is False
-    assert numbers_match("+233200000000", "233200000000") is False
-
-
 def test_quiet_hours_cross_midnight():
     zone = "Africa/Accra"
     late = datetime(2026, 11, 8, 22, 30, tzinfo=timezone.utc)
@@ -58,46 +46,38 @@ def test_unknown_timezone_fails_loud():
 def test_daily_cap_blocks_before_any_call():
     settings = _Settings(daily_call_cap=2)
     with pytest.raises(ConfigError, match="Daily call cap"):
-        check_outbound(settings, "web", recent_calls=2)
+        check_outbound(settings, recent_calls=2)
 
 
 def test_quiet_hours_block_when_enabled():
     settings = _Settings(quiet_hours_enabled=True)
     late = datetime(2026, 11, 8, 23, 0, tzinfo=timezone.utc)
     with pytest.raises(ConfigError, match="Quiet hours"):
-        check_outbound(settings, "web", now=late, recent_calls=0)
+        check_outbound(settings, now=late, recent_calls=0)
 
 
-def test_caller_allowlist_fails_closed():
-    settings = _Settings()
-    assert caller_allowed(settings, "+233200000000")
-    assert caller_allowed(settings, "+233200000001") is False
-    assert caller_allowed(settings, "") is False
-    settings.owner_number = ""
-    assert caller_allowed(settings, "+233200000000") is False
-
-
-def test_phone_requires_explicit_enable(monkeypatch):
+def test_every_required_value_is_checked_before_dialing(monkeypatch):
     from hermes_call_me.config import load_settings, require_call_config
 
     configure(monkeypatch)
-    settings = load_settings()
-    require_call_config(settings, "web")
-    with pytest.raises(ConfigError, match="Phone calls are off"):
-        require_call_config(settings, "phone")
+    require_call_config(load_settings())
+    for name, value, message in (
+        ("HERMES_CALL_ME_PIN", "", "HERMES_CALL_ME_PIN"),
+        ("HERMES_CALL_ME_PIN", "12a4", "4 to 12 digits"),
+        ("HERMES_CALL_ME_OWNER_NUMBER", "4155550100", "E.164"),
+        ("CALLE_API_KEY", "", "CALLE_API_KEY"),
+    ):
+        configure(monkeypatch, **{name: value})
+        with pytest.raises(ConfigError, match=message):
+            require_call_config(load_settings())
 
 
-def test_missing_key_names_the_variable(monkeypatch):
-    from hermes_call_me.config import load_settings, require_call_config
+def test_region_defaults_to_us_and_must_be_two_letters(monkeypatch):
+    from hermes_call_me.config import load_settings
 
-    configure(monkeypatch, VAPI_API_KEY="")
-    with pytest.raises(ConfigError, match="VAPI_API_KEY"):
-        require_call_config(load_settings(), "web")
-
-
-def test_localhost_webhook_is_refused(monkeypatch):
-    from hermes_call_me.config import load_settings, require_call_config
-
-    configure(monkeypatch, HERMES_CALL_ME_WEBHOOK_URL="http://127.0.0.1:8787")
-    with pytest.raises(ConfigError, match="https"):
-        require_call_config(load_settings(), "web")
+    configure(monkeypatch)
+    assert load_settings().calle_region == "US"
+    assert load_settings().calle_locale == "en-US"
+    configure(monkeypatch, HERMES_CALL_ME_REGION="USA")
+    with pytest.raises(ConfigError, match="two-letter"):
+        load_settings()

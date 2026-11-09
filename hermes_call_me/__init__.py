@@ -1,3 +1,3 @@
-"""Hermes Call Me: the agent calls its owner for approval, help, or a report. Fails closed."""
+"""Hermes Call Me: the agent phones its owner through CALL-E. Fails closed."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -1,7 +1,7 @@
 [project]
 name = "hermes-call-me"
-version = "0.1.0"
-description = "Hermes plugin: the agent calls its owner for approval, help, or a progress report."
+version = "0.2.0"
+description = "Hermes plugin: the agent phones its owner through CALL-E for approval, help, or a progress report."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -17,8 +17,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["hermes_call_me*"]
 
-[tool.setuptools.package-data]
-hermes_call_me = ["demo.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
