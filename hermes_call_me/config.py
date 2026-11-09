@@ -283,7 +283,7 @@ def _require_webhook(settings: Settings) -> None:
     if not settings.webhook_public_url:
         raise ConfigError(
             "Set HERMES_CALL_ME_WEBHOOK_URL to the public https origin of this "
-            "server (cloudflared or similar). No call was placed."
+            "server, from an https tunnel (see the README). No call was placed."
         )
     if not settings.webhook_public_url.lower().startswith("https://"):
         raise ConfigError(

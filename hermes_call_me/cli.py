@@ -18,7 +18,7 @@ def serve() -> int:
     port = settings.webhook_port
     print(f"Demo page:  http://127.0.0.1:{port}/demo")
     print(f"Webhook:    http://127.0.0.1:{port}/vapi/webhook")
-    print("Point cloudflared (or similar) at this port.")
+    print("Expose this port with an https tunnel (see the README).")
     print("Set HERMES_CALL_ME_WEBHOOK_URL to the https origin, with no path.")
     if not settings.vapi_api_key or not settings.owner_pin or not settings.webhook_secret:
         print("The page will load. Starting a call still needs VAPI_API_KEY,")
