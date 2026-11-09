@@ -17,7 +17,7 @@
 
 | |
 | --- |
-| [The problem](#the-problem) · [What it does](#what-hermes-call-me-does) · [How it works](#how-it-works) · [Architecture](#architecture) · [Before you install](#before-you-install) · [Setup](#setup) · [Tools](#the-three-tools) · [Guard](#optional-risky-tool-guard) · [Configuration](#configuration) · [Cost](#cost) · [Layout](#repository-layout) · [Checks](#checks) · [Troubleshooting](#troubleshooting) · [Scope notes](#honest-scope-notes) |
+| [The problem](#the-problem) · [What it does](#what-hermes-call-me-does) · [How it works](#how-it-works) · [Architecture](#architecture) · [Before you install](#before-you-install) · [Setup](#setup) · [Tools](#the-three-tools) · [Guard](#optional-risky-tool-guard) · [Configuration](#configuration) · [Security](#security) · [Cost](#cost) · [Layout](#repository-layout) · [Checks](#checks) · [Troubleshooting](#troubleshooting) · [Scope notes](#honest-scope-notes) |
 
 ## The problem
 
@@ -40,15 +40,15 @@ Every call starts with your **spoken PIN, which the plugin compares**. The CALL-
 1. **The tool is called.** Hermes calls `call_for_approval(action, risk, summary)`, or one of the other two tools.
 2. **Policy check.** Before CALL-E is contacted, the plugin checks:
    - a PIN, your E.164 number and a CALL-E key are all set
-   - no other call is active
-   - the daily cap (default 8) is not reached
+   - the text from the model is under 1,000 characters per field
    - it's outside quiet hours, if you turned them on
+   - no other call is active and the daily cap (default 8) is not reached; these two are checked in the same database transaction that records the call, so parallel tool calls can't both get through
 
    If any check fails, nothing is dialed.
 3. **Place the call.** `POST /v2/calls` with the task, your number, region `US` and locale `en-US` by default, a closed result schema, and an `Idempotency-Key`. If acceptance is uncertain (a lost response, a 5xx, or `409 creation_in_progress`), the same body and key are replayed, which [never dials twice](https://docs.heycall-e.com/calls#idempotency).
 4. **Wait.** `GET /v2/calls/{id}` every two seconds while `result_status` is `pending`, for up to `call_timeout_seconds` (default 180).
 5. **Verify.** The plugin compares the PIN digits you said with your PIN and, for an approval, the code you repeated with the one it generated. Only then does it read your decision.
-6. **Record.** The transcript, decision and outcome go into the plugin's SQLite database. An approval is stored as **single use** and expires after 10 minutes.
+6. **Record.** The decision and outcome go into the plugin's SQLite database, with the transcript's spoken numbers redacted and the one-time code wiped. The tool result holds only the checked fields, never the transcript. An approval is stored as **single use** and expires after 10 minutes.
 
 ## Architecture
 
@@ -80,10 +80,10 @@ What the plugin does on your machine, so you can decide before enabling it:
 
 | What | Detail |
 | --- | --- |
-| **Third-party network calls** | `https://api.heycall-e.com` only. The action summary (or issue, or report), your number and the call task are sent to CALL-E. CALL-E processes the call audio; the plugin gets back the transcript and the structured result. |
+| **Third-party network calls** | `https://api.heycall-e.com` only. The action summary (or issue, or report), your number and the call task are sent to CALL-E. CALL-E processes the call audio; the plugin gets back the transcript and the structured result. Your PIN is never sent. |
 | **Paid calls** | Every tool call is a real phone call billed to your CALL-E account. It only dials `HERMES_CALL_ME_OWNER_NUMBER`, one call at a time, at most 8 a day by default. |
-| **Stored data** | `<HERMES_HOME>/plugin-data/hermes-call-me/data.db` holds transcripts, decisions, outcomes and single-use approvals. |
-| **Credentials** | `CALLE_API_KEY` and `HERMES_CALL_ME_PIN` are secret fields, read through Hermes's secret store for the active profile. The plugin never reads `.env` files or any other credential store. |
+| **Stored data** | `<HERMES_HOME>/plugin-data/hermes-call-me/data.db` holds decisions, outcomes, single-use approvals and transcripts, with spoken PINs and codes replaced by `[number]`. |
+| **Credentials** | `CALLE_API_KEY` and `HERMES_CALL_ME_PIN` are secret fields, read through Hermes's secret store for the active profile. Other settings come from the active profile's plugin config. The plugin never reads `.env` files or any other credential store. |
 | **Waiting for a person** | A tool call waits at most `call_timeout_seconds` (default 180, max 600), then returns `no_answer`. Unattended runs are not left hanging, and the plugin never approves anything itself. |
 | **Not included** | No local server, no inbound calls, no shell commands, no telemetry, no self-update. |
 
@@ -126,7 +126,7 @@ Registered with the plugin:
 | `call_for_help(issue, what_i_tried)` | The problem and what was tried, then "what should I do?" | `instructions`, or `null` with a `reason` if the PIN failed or the answer was unclear |
 | `call_report(done, left, progress)` | The report, then "do you acknowledge it?" | `delivered` true or false, and `reply` if you left one |
 
-The one-time code never appears in a tool result, and the PIN never appears in the task sent to CALL-E.
+The PIN never appears in the task sent to CALL-E. Neither the PIN, the one-time code nor the transcript appears in a tool result.
 
 ## Optional risky-tool guard
 
@@ -138,7 +138,7 @@ The hook doesn't place the call itself. Hermes gives a hook about 30 seconds and
 
 ## Configuration
 
-Set everything in Hermes's plugin settings. The environment variable names are used outside Hermes (tests, `python -m hermes_call_me`).
+Set everything in Hermes's plugin settings. Inside Hermes, environment variables are ignored, so one profile can't pick up another's values. The environment variable names below are used only outside Hermes (tests, `python -m hermes_call_me`).
 
 | Setting | Env | Default | Notes |
 | --- | --- | --- | --- |
@@ -152,6 +152,16 @@ Set everything in Hermes's plugin settings. The environment variable names are u
 | Timezone | `HERMES_CALL_ME_TIMEZONE` | `America/New_York` | IANA name |
 | Guard | `HERMES_CALL_ME_GUARD` · `HERMES_CALL_ME_RISKY_TOOLS` | off · built-in list | Regular expressions on tool names |
 | Approval lifetime | `HERMES_CALL_ME_APPROVAL_TTL_SECONDS` | `600` | Single use, at least 30 |
+
+## Security
+
+The full threat model, the known limits and how to report a problem are in [`SECURITY.md`](SECURITY.md). In short:
+
+- **The PIN is checked by the plugin.** CALL-E's agent never knows it, and an approval also needs a one-time code repeated back.
+- **The model never sees the PIN, the code or the transcript.** Transcripts are stored with spoken numbers redacted.
+- **Text from the model is treated as data.** It's capped at 1,000 characters and quoted so it can't instruct CALL-E's agent.
+- **No double calls.** One call at a time and the daily cap are enforced atomically, and retries never redial.
+- **The guard fails closed.** An unreadable guard setting turns it on.
 
 ## Cost
 
@@ -190,6 +200,7 @@ hermes-call-me/
 ├── tests/                     # pytest; all HTTP is stubbed
 ├── .github/workflows/tests.yml
 ├── .env.example               # names for running outside Hermes
+├── SECURITY.md                # threat model, known limits, reporting
 └── LICENSE                    # MIT
 ```
 
@@ -212,7 +223,11 @@ The tests cover:
 - that an approval is single use, and that the guard exempts only the plugin's own tools
 - one call at a time, the daily cap, quiet hours across midnight
 - that secrets are read through Hermes's secret scope, ahead of the process environment
-- that a missing key, PIN or number fails before any HTTP request
+- that a missing key, PIN or number, or an over-long summary, fails before any HTTP request
+- that parallel calls can't both be reserved (eight threads, one call)
+- that spoken PINs and codes are redacted from stored transcripts and never returned to the model
+- that model text can't close its quote markers in the CALL-E task
+- that, inside Hermes, profile config wins over the process environment
 
 ## Troubleshooting
 
@@ -238,7 +253,10 @@ Wait, or raise the daily cap deliberately.
 Quiet hours are on. Call outside that window or turn them off.
 
 **`A call is already in progress (...). Nothing new was dialed.`**
-Only one call runs at a time. A call stuck past the timeout is cleared automatically on the next attempt.
+Only one call runs at a time. A call stuck well past the timeout (timeout plus 5 minutes) is cleared automatically on the next attempt.
+
+**`summary is 1234 characters; the limit is 1000`**
+The model sent too much text for one call. Ask Hermes for a shorter summary.
 
 **`CALL-E call ... was still pending after 180s.`**
 The tool returned `no_answer` and did not redial. The call may still finish on CALL-E's side; check the dashboard before asking Hermes to call again.
@@ -246,6 +264,8 @@ The tool returned `no_answer` and did not redial. The call may still finish on C
 ## Honest scope notes
 
 - **Approval means a spoken PIN, not identity.** Anyone who knows the PIN and answers your phone can approve. Use a PIN you don't use anywhere else.
+- **Whoever answers hears the summary.** CALL-E's agent can't check the PIN mid-call, so the summary is read after any digits are said. Keep secrets out of it.
+- **An approval covers a tool name, not its arguments.** One approved `deploy_prod` lets one `deploy_prod` call run within 10 minutes, whatever its arguments.
 - **Hermes calls you; you can't call Hermes.** CALL-E's API doesn't receive inbound calls, so there is no inbound path.
 - **The hook doesn't place the call.** The guard only checks for an approval on file. The model has to call `call_for_approval` first.
 - **What Hermes says is sent to CALL-E.** Whatever goes in `summary`, `issue` or `done` is read aloud on the call and processed by CALL-E.

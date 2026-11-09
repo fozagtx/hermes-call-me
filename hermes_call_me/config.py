@@ -1,4 +1,4 @@
-"""Settings from Hermes secret storage, plugin config, and the environment.
+"""Settings from Hermes secret storage and plugin config, or the environment outside Hermes.
 
 Nothing here talks to CALL-E. Missing secrets stay blank until a call site
 validates them and raises ``ConfigError`` with the name of the variable.
@@ -61,10 +61,17 @@ def _plugin_value(key: str, default):
 
 
 def _first(env_name: str, config_key: str, default):
+    """Inside Hermes, read the active profile's plugin config only.
+
+    The process environment is shared by every profile, so it is read only
+    when no Hermes context is attached (tests, ``python -m hermes_call_me``).
+    """
+    if get_context() is not None:
+        return _plugin_value(config_key, default)
     env = os.environ.get(env_name)
     if env is not None and env.strip() != "":
         return env.strip()
-    return _plugin_value(config_key, default)
+    return default
 
 
 def _bool(value, default: bool, name: str) -> bool:

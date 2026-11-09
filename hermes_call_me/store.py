@@ -20,6 +20,7 @@ _key: str | None = None
 
 _CALL_COLUMNS = {
     "calle_call_id",
+    "one_time_code",
     "status",
     "reason",
     "decision",
@@ -143,22 +144,71 @@ def _write(fn):
         return result
 
 
-def create_call(*, purpose: str, owner_number: str, one_time_code: str) -> dict:
+class CallRefused(Exception):
+    """Another call is active, or the daily cap is reached. Nothing was dialed."""
+
+
+def reserve_call(
+    *,
+    purpose: str,
+    owner_number: str,
+    one_time_code: str,
+    daily_cap: int,
+    stale_after_seconds: int,
+) -> dict:
+    """Check "one call at a time" and the daily cap, then insert, in one transaction.
+
+    ``BEGIN IMMEDIATE`` takes SQLite's write lock first, so two tool calls
+    (or two processes sharing this file) cannot both pass the checks.
+    """
     call_id = "call_" + uuid.uuid4().hex
-    now = iso()
-
-    def run(conn):
-        conn.execute(
-            """
-            INSERT INTO phone_calls (
-                id, purpose, owner_number, one_time_code, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'starting', ?, ?)
-            """,
-            (call_id, purpose, owner_number, one_time_code, now, now),
-        )
-        return _row(conn.execute("SELECT * FROM phone_calls WHERE id = ?", (call_id,)).fetchone())
-
-    return _write(run)
+    now = utcnow()
+    conn = open_db()
+    with _lock:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            active = conn.execute(
+                "SELECT * FROM phone_calls WHERE status IN ('starting', 'in_progress') "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            if active is not None:
+                started = datetime.strptime(active["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                if (now - started).total_seconds() <= stale_after_seconds:
+                    raise CallRefused(
+                        f"A call is already in progress ({active['id']}, {active['purpose']}). "
+                        "Wait for it to finish before starting another. Nothing new was dialed."
+                    )
+                conn.execute(
+                    "UPDATE phone_calls SET status = 'timeout', reason = 'timeout', one_time_code = '', "
+                    "updated_at = ?, ended_at = ? WHERE id = ?",
+                    (iso(now), iso(now), active["id"]),
+                )
+            since = iso(now - timedelta(hours=24))
+            used = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM phone_calls WHERE calle_call_id IS NOT NULL AND created_at >= ?",
+                    (since,),
+                ).fetchone()["n"]
+            )
+            if daily_cap == 0 or used >= daily_cap:
+                raise CallRefused(
+                    f"Daily call cap reached ({used} of {daily_cap} in the last 24 hours). "
+                    "No call was placed. Raise HERMES_CALL_ME_DAILY_CAP if this is intentional."
+                )
+            conn.execute(
+                """
+                INSERT INTO phone_calls (
+                    id, purpose, owner_number, one_time_code, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'starting', ?, ?)
+                """,
+                (call_id, purpose, owner_number, one_time_code, iso(now), iso(now)),
+            )
+            row = _row(conn.execute("SELECT * FROM phone_calls WHERE id = ?", (call_id,)).fetchone())
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+        return row
 
 
 def update_call(call_id: str, **fields) -> dict | None:
@@ -204,21 +254,6 @@ def recent_calls(limit: int = 8) -> list[dict]:
             (limit,),
         ).fetchall()
         return [_row(row) for row in rows]
-
-    return _write(run)
-
-
-def in_progress() -> dict | None:
-    def run(conn):
-        return _row(
-            conn.execute(
-                """
-                SELECT * FROM phone_calls
-                WHERE status IN ('starting', 'in_progress')
-                ORDER BY created_at DESC LIMIT 1
-                """
-            ).fetchone()
-        )
 
     return _write(run)
 

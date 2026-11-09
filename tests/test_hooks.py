@@ -16,7 +16,7 @@ def test_guard_blocks_then_allows_one_use(monkeypatch):
     assert guard_tool("read_file", {"path": "README.md"}) is None
     assert guard_tool("call_for_approval", {"action": "deploy_prod"}) is None
 
-    row = store.create_call(purpose="approval", owner_number="+14155550100", one_time_code="135790")
+    row = store.reserve_call(purpose="approval", owner_number="+14155550100", one_time_code="135790", daily_cap=8, stale_after_seconds=600)
     store.save_approval(call_id=row["id"], action="deploy_prod", summary="ship", risk="high", ttl_seconds=600)
     assert guard_tool("deploy_prod", {"target": "prod"}) is None
     again = guard_tool("deploy_prod", {"target": "prod"})

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from . import calle, store
 from .calle_call import build_request, interpret, one_time_code, transcript_text
-from .config import ConfigError, Settings, load_settings, require_call_config, scrub
+from .config import ConfigError, load_settings, require_call_config, scrub
 from .policy import check_outbound
 
 NO_ANSWER_REASONS = {"no_answer", "timeout", "error"}
@@ -34,39 +32,38 @@ def run_report(args: dict) -> dict:
     )
 
 
+MAX_FACT_CHARS = 1000
+
+
 def _need(args: dict, key: str) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"Missing {key}. No call was placed.")
-    return value.strip()
-
-
-def _abandon_stale(settings: Settings) -> None:
-    active = store.in_progress()
-    if active is None:
-        return
-    try:
-        started = datetime.strptime(active["created_at"], "%Y-%m-%dT%H:%M:%SZ")
-    except (TypeError, ValueError):
-        return
-    age = (store.utcnow() - started.replace(tzinfo=timezone.utc)).total_seconds()
-    if age > settings.call_timeout_seconds + 90:
-        store.update_call(active["id"], status="timeout", reason="timeout", ended_at=store.iso())
-        return
-    raise ConfigError(
-        f"A call is already in progress ({active['id']}, {active['purpose']}). "
-        "Wait for it to finish before starting another. Nothing new was dialed."
-    )
+    text = " ".join(value.split())
+    if len(text) > MAX_FACT_CHARS:
+        raise ConfigError(
+            f"{key} is {len(text)} characters; the limit is {MAX_FACT_CHARS} so the call stays short. "
+            "No call was placed."
+        )
+    return text
 
 
 def _run(purpose: str, facts: dict) -> dict:
     settings = load_settings()
     require_call_config(settings)
-    _abandon_stale(settings)
     check_outbound(settings, recent_calls=store.count_recent_calls())
 
     code = one_time_code()
-    row = store.create_call(purpose=purpose, owner_number=settings.owner_number, one_time_code=code)
+    try:
+        row = store.reserve_call(
+            purpose=purpose,
+            owner_number=settings.owner_number,
+            one_time_code=code,
+            daily_cap=settings.daily_call_cap,
+            stale_after_seconds=settings.call_timeout_seconds + 300,
+        )
+    except store.CallRefused as exc:
+        raise ConfigError(str(exc)) from exc
     if purpose == "approval":
         store.update_call(
             row["id"],
@@ -83,7 +80,9 @@ def _run(purpose: str, facts: dict) -> dict:
         created = calle.create_call(body, settings, idempotency_key=f"hermes-{row['id']}")
     except calle.CalleError as exc:
         message = redact(exc)
-        store.update_call(row["id"], status="failed", reason="error", error=message, ended_at=store.iso())
+        store.update_call(
+            row["id"], status="failed", reason="error", error=message, one_time_code="", ended_at=store.iso()
+        )
         raise calle.CalleError(message) from exc
     calle_id = created.get("id") if isinstance(created, dict) else None
     if not isinstance(calle_id, str) or not calle_id:
@@ -91,7 +90,9 @@ def _run(purpose: str, facts: dict) -> dict:
             "CALL-E POST /v2/calls did not return an id. No second call was placed. Keys: "
             + ", ".join(sorted(str(key) for key in (created or {})))
         )
-        store.update_call(row["id"], status="failed", reason="error", error=message, ended_at=store.iso())
+        store.update_call(
+            row["id"], status="failed", reason="error", error=message, one_time_code="", ended_at=store.iso()
+        )
         raise calle.CalleError(message)
     store.update_call(row["id"], calle_call_id=calle_id, status="in_progress")
 
@@ -110,6 +111,7 @@ def _run(purpose: str, facts: dict) -> dict:
             pin_verified=0,
             error=(redact(exc) + note)[:800],
             ended_reason="client-timeout",
+            one_time_code="",
             ended_at=store.iso(),
         )
         return tool_payload(store.get_call(row["id"]))
@@ -125,6 +127,7 @@ def _run(purpose: str, facts: dict) -> dict:
         reply=outcome["tool_reply"],
         transcript=transcript_text(ready),
         ended_reason=str(ready.get("call_outcome") or ready.get("status") or "")[:300],
+        one_time_code="",
         ended_at=store.iso(),
     )
     fresh = store.get_call(row["id"]) or row
@@ -181,6 +184,6 @@ def tool_payload(row: dict | None) -> dict:
     elif purpose == "report":
         payload["delivered"] = reason in {"delivered", "delivered_no_reply"} and pin_ok
         payload["reply"] = row.get("reply") if pin_ok else None
-    if pin_ok and row.get("transcript"):
-        payload["transcript"] = row["transcript"]
+    # The transcript stays in the call log only. The model gets the checked
+    # fields above, never the raw conversation.
     return payload

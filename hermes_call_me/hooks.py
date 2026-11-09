@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 
-from .config import ConfigError, load_settings
-from .context import get_context
+from .config import ConfigError, _bool, _first, load_settings
 from .policy import DEFAULT_RISKY_PATTERNS
 from . import store
 
@@ -15,25 +13,11 @@ _OURS = {"call_for_approval", "call_for_help", "call_report"}
 
 
 def _guard_requested() -> bool:
-    raw = os.environ.get("HERMES_CALL_ME_GUARD")
-    if raw is not None and raw.strip() != "":
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
-    ctx = get_context()
-    getter = getattr(ctx, "get_config", None) if ctx is not None else None
-    if getter is None:
-        return False
+    """A value that cannot be read as true or false turns the guard on."""
     try:
-        value = getter("guard_enabled", default=False)
-    except TypeError:
-        try:
-            value = getter("guard_enabled")
-        except Exception:
-            return False
-    except Exception:
-        return False
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+        return _bool(_first("HERMES_CALL_ME_GUARD", "guard_enabled", False), False, "HERMES_CALL_ME_GUARD")
+    except ConfigError:
+        return True
 
 
 def guard_tool(tool_name, args=None, **kwargs):
