@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Call Me</title>
+<style>
+  :root {
+    --paper: #f4efe6;
+    --ink: #1d1914;
+    --muted: #5c5348;
+    --line: #d9d0c2;
+    --copper: #8d3b22;
+    --copper-dark: #6d2c18;
+    --good: #1c6b43;
+    --bad: #8d2433;
+    --card: #fffaf3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.45;
+  }
+  header, main { max-width: 1080px; margin: 0 auto; padding: 28px 20px; }
+  header { padding-bottom: 0; }
+  h1 { font-size: 2.4rem; font-weight: 600; letter-spacing: -0.03em; margin: 0 0 8px; }
+  .lede { font-size: 1.15rem; max-width: 42rem; margin: 0; }
+  .meta { color: var(--muted); margin-top: 10px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .pill { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 10px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.82rem; }
+  .pill.bad { color: var(--bad); border-color: #e4c2c6; }
+  .pill.good { color: var(--good); border-color: #c5ddcf; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } h1 { font-size: 2rem; } }
+  article {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  article h2 { margin: 0; font-size: 1.25rem; }
+  article p { margin: 0; color: var(--muted); }
+  label { display: block; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  textarea, input[type="text"] {
+    width: 100%;
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font: 0.95rem/1.4 Georgia, serif;
+    color: var(--ink);
+  }
+  textarea { min-height: 64px; resize: vertical; }
+  button {
+    margin-top: auto;
+    border: 0;
+    background: var(--copper);
+    color: #fffaf3;
+    border-radius: 999px;
+    padding: 10px 14px;
+    font: 600 0.95rem/1 ui-sans-serif, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  button:hover { background: var(--copper-dark); }
+  button:disabled { opacity: 0.55; cursor: wait; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .phone-row { display: flex; align-items: center; gap: 8px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.85rem; }
+  #stage {
+    margin-top: 18px;
+    background: var(--ink);
+    color: #f4efe6;
+    border-radius: 16px;
+    padding: 18px;
+    min-height: 140px;
+  }
+  #stage h2 { margin: 0 0 8px; font-size: 1.2rem; }
+  #stage .status { font-family: ui-sans-serif, system-ui, sans-serif; color: #e7d7c4; }
+  #stage pre {
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    background: #2a241e;
+    padding: 12px;
+    border-radius: 10px;
+    overflow: auto;
+  }
+  .join { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  footer { max-width: 1080px; margin: 0 auto; padding: 0 20px 32px; color: var(--muted); font-size: 0.92rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hermes Call Me</h1>
+  <p class="lede">Hermes is working alone. This page is the owner’s browser, not a phone line. It places a real Vapi web call, asks for your PIN, then records the decision on the same webhook the phone path uses.</p>
+  <p class="meta" id="meta">Checking local configuration…</p>
+  <div class="checks" id="checks"></div>
+</header>
+<main>
+  <div class="grid">
+    <article>
+      <h2>Approval</h2>
+      <p>Risky work waits until you say the PIN and then approve. Anything else fails closed.</p>
+      <label for="action">Action</label>
+      <input id="action" type="text" value="Deploy payments-api to production">
+      <label for="risk">Risk</label>
+      <input id="risk" type="text" value="high">
+      <label for="summary">Summary</label>
+      <textarea id="summary">This ships the checkout change and runs the payments migration.</textarea>
+      <button type="button" data-purpose="approval">Call for approval</button>
+    </article>
+    <article>
+      <h2>Help</h2>
+      <p>Hermes is stuck on a production issue and needs what you know.</p>
+      <label for="issue">Issue</label>
+      <textarea id="issue">Checkout returns 500 after the last deploy. The payments worker still errors.</textarea>
+      <label for="tried">What Hermes tried</label>
+      <textarea id="tried">Rolled the app server back. The worker error stayed.</textarea>
+      <button type="button" data-purpose="help">Call for help</button>
+    </article>
+    <article>
+      <h2>Report</h2>
+      <p>The work is finished. Hermes tells you what it did, what is left, and where things stand.</p>
+      <label for="done">Done</label>
+      <textarea id="done">Migrated the queue worker and watched the error rate drop.</textarea>
+      <label for="left">Left</label>
+      <textarea id="left">Keep an eye on checkout for the next hour.</textarea>
+      <label for="progress">Progress</label>
+      <input id="progress" type="text" value="Shipped. Staging is healthy.">
+      <button type="button" data-purpose="report">Call with the report</button>
+    </article>
+  </div>
+  <section id="stage">
+    <h2 id="stage-title">No call yet</h2>
+    <p class="status" id="stage-status">Leave this page open. If Hermes starts a browser call from a tool, a join button shows up here.</p>
+    <div class="join" id="join"></div>
+    <pre id="stage-body" hidden></pre>
+  </section>
+  <p class="phone-row">
+    <input id="phone" type="checkbox" disabled>
+    <label for="phone" style="text-transform:none; letter-spacing:0; font-size:0.95rem; color:var(--ink);">Place a real CALL-E phone call instead. This dials the one allowlisted number. Off unless phone calls are enabled.</label>
+  </p>
+</main>
+<footer>
+  A one-minute browser call is a few cents of Vapi hosting plus speech. A CALL-E phone call is a separate charge, about $0.22 for a 60-second US one-shot call on their published rates. The transcript stays on this machine.
+</footer>
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+<script>
+const stageTitle = document.getElementById("stage-title");
+const stageStatus = document.getElementById("stage-status");
+const stageBody = document.getElementById("stage-body");
+const joinBox = document.getElementById("join");
+const checks = document.getElementById("checks");
+const meta = document.getElementById("meta");
+let daily = null;
+let polling = null;
+let joinedId = null;
+let announced = null;
+
+function pill(text, ok) {
+  const span = document.createElement("span");
+  span.className = "pill " + (ok ? "good" : "bad");
+  span.textContent = text;
+  checks.appendChild(span);
+}
+
+async function loadConfig() {
+  const response = await fetch("/demo/config", { credentials: "same-origin" });
+  const body = await response.json();
+  checks.replaceChildren();
+  if (!response.ok) {
+    meta.textContent = body.error || "The demo API refused the request. Open this page at 127.0.0.1, not through the public tunnel.";
+    return;
+  }
+  meta.textContent = "Browser calls are the demo. Phone stays off until you enable it for one real call.";
+  pill(body.vapi_configured ? "Vapi key set" : "Vapi key missing", body.vapi_configured);
+  pill(body.pin_configured ? "PIN set" : "PIN missing", body.pin_configured);
+  pill(body.webhook_configured ? "Public webhook URL set" : "Public https webhook URL missing", body.webhook_configured);
+  pill(body.phone_calls_enabled ? "Phone calls enabled" : "Phone calls off", true);
+  if (body.owner_number_masked) pill("Owner " + body.owner_number_masked, true);
+  document.getElementById("phone").disabled = !body.phone_calls_enabled;
+}
+
+function payload(purpose) {
+  const body = {
+    purpose,
+    channel: document.getElementById("phone").checked ? "phone" : "web",
+  };
+  if (body.channel === "phone") body.confirm = "PHONE";
+  if (purpose === "approval") {
+    body.action = document.getElementById("action").value;
+    body.risk = document.getElementById("risk").value;
+    body.summary = document.getElementById("summary").value;
+  } else if (purpose === "help") {
+    body.issue = document.getElementById("issue").value;
+    body.what_i_tried = document.getElementById("tried").value;
+  } else {
+    body.done = document.getElementById("done").value;
+    body.left = document.getElementById("left").value;
+    body.progress = document.getElementById("progress").value;
+  }
+  return body;
+}
+
+async function start(purpose, button) {
+  button.disabled = true;
+  stageTitle.textContent = "Starting a real Vapi call…";
+  stageStatus.textContent = "The private API key stays on this machine. The browser only receives a join URL.";
+  stageBody.hidden = true;
+  try {
+    const response = await fetch("/demo/start", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload(purpose)),
+    });
+    const body = await response.json();
+    if (!response.ok || !body.ok) {
+      stageTitle.textContent = "Call was not placed";
+      stageStatus.textContent = body.error || "Vapi refused the call.";
+      return;
+    }
+    showCall(body, true);
+    watch(body.call_id);
+  } catch (error) {
+    stageTitle.textContent = "Could not reach the local server";
+    stageStatus.textContent = String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function showCall(call, autoJoin) {
+  const status = call.status || "in_progress";
+  stageTitle.textContent = (call.purpose || "Call") + " · " + (call.channel || "web");
+  stageStatus.textContent = status + (call.reason ? " · " + call.reason : "");
+  joinBox.replaceChildren();
+  if (call.join_url && call.channel !== "phone" && !["approved", "denied", "no_answer", "timeout", "completed", "unclear", "failed"].includes(status)) {
+    const join = document.createElement("button");
+    join.textContent = joinedId === call.id ? "On the call" : "Join in this browser";
+    join.disabled = joinedId === call.id;
+    join.onclick = () => connect(call.join_url, call.id);
+    const hang = document.createElement("button");
+    hang.className = "ghost";
+    hang.textContent = "Hang up";
+    hang.onclick = () => hangup(call.id || call.call_id);
+    joinBox.append(join, hang);
+    if (autoJoin) connect(call.join_url, call.id || call.call_id);
+  }
+  if (call.transcript || call.instructions || call.reply || call.error || call.structured) {
+    stageBody.hidden = false;
+    const view = {
+      status: call.status,
+      reason: call.reason,
+      pin_verified: call.pin_verified,
+      instructions: call.instructions,
+      reply: call.reply,
+      cost_usd: call.cost_usd,
+      duration_seconds: call.duration_seconds,
+      ended_reason: call.ended_reason,
+      error: call.error,
+      transcript: call.transcript,
+      structured_not_authoritative: call.structured,
+    };
+    stageBody.textContent = JSON.stringify(view, null, 2);
+  }
+}
+
+async function connect(url, id) {
+  const DailyApi = window.DailyIframe || window.Daily;
+  if (!DailyApi || !DailyApi.createCallObject) {
+    stageStatus.textContent = "The Daily client did not load. Open this join URL in a tab: " + url;
+    return;
+  }
+  try {
+    if (daily) {
+      await daily.leave().catch(() => {});
+      daily.destroy();
+    }
+    daily = DailyApi.createCallObject();
+    daily.on("joined-meeting", () => {
+      stageStatus.textContent = "Connected. Say the PIN when Hermes asks. Wrong PIN, silence, or a vague answer is not approval.";
+    });
+    daily.on("error", (event) => {
+      stageStatus.textContent = "Call audio error: " + (event && event.errorMsg ? event.errorMsg : "see the browser console.");
+    });
+    await daily.join({ url });
+    joinedId = id;
+  } catch (error) {
+    stageStatus.textContent = "Could not join the Vapi room: " + error + ". URL: " + url;
+  }
+}
+
+async function hangup(id) {
+  await fetch("/demo/calls/" + id + "/hangup", { method: "POST", credentials: "same-origin" });
+  if (daily) {
+    await daily.leave().catch(() => {});
+  }
+}
+
+function watch(id) {
+  if (polling) clearInterval(polling);
+  polling = setInterval(async () => {
+    const response = await fetch("/demo/calls/" + id, { credentials: "same-origin" });
+    if (!response.ok) return;
+    const body = await response.json();
+    showCall(body.call, false);
+    const done = ["approved", "denied", "no_answer", "timeout", "completed", "unclear", "failed"];
+    if (body.call && done.includes(body.call.status)) {
+      clearInterval(polling);
+      if (daily) daily.leave().catch(() => {});
+    }
+  }, 1500);
+}
+
+async function watchActive() {
+  try {
+    const response = await fetch("/demo/active", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.call && body.call.id !== announced) {
+      announced = body.call.id;
+      stageTitle.textContent = "Hermes started a browser call";
+      stageStatus.textContent = "Join it here. The tool that started it is waiting for the webhook result.";
+      showCall(body.call, false);
+      watch(body.call.id);
+    }
+  } catch (error) {
+    /* the page stays usable if a poll fails */
+  }
+}
+
+document.querySelectorAll("button[data-purpose]").forEach((button) => {
+  button.addEventListener("click", () => start(button.dataset.purpose, button));
+});
+loadConfig();
+setInterval(watchActive, 2000);
+</script>
+</body>
+</html>

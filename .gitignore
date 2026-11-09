@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.env
+*.pyc
+*.pyo
+*.db
+*.db-journal
+.hermes-call-me/
+.DS_Store
